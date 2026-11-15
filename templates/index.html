@@ -37,6 +37,7 @@
     .user { align-self: flex-end; background: var(--verde); color: #fff; }
     .bot { align-self: flex-start; background: var(--balao-bot); }
     .erro { background: var(--erro); }
+    .msg code { background: rgba(0,0,0,.12); padding: 1px 5px; border-radius: 4px; font-size: .92em; }
 
     #previa { display: none; padding: 8px 12px 0; align-items: center; gap: 8px; font-size: .85rem; }
     #previa img { height: 56px; border-radius: 8px; border: 1px solid var(--borda); }
@@ -205,6 +206,21 @@
     }
   });
 
+  // ---------- formatação das respostas ----------
+  // transforma o markdown simples da IA (**negrito**, listas...) em texto formatado
+  function formatar(texto) {
+    let html = texto
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+    html = html.replace(/^#{1,6}\s*(.+)$/gm, "<strong>$1</strong>");   // títulos
+    html = html.replace(/^\s*[-*]\s+(.+)$/gm, "• $1");                // listas
+    html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");     // negrito
+    html = html.replace(/(^|[^*])\*(?!\s)([^*\n]+?)\*(?!\*)/g, "$1<em>$2</em>"); // itálico
+    html = html.replace(/`([^`\n]+)`/g, "<code>$1</code>");            // código
+    return html;
+  }
+
   // ---------- conversa ----------
   function adicionar(texto, classe, imagem) {
     const div = document.createElement("div");
@@ -268,7 +284,7 @@
         const { done, value } = await leitor.read();
         if (done) break;
         texto += decoder.decode(value, { stream: true });
-        balao.textContent = texto;
+        balao.innerHTML = formatar(texto);
         conversa.scrollTop = conversa.scrollHeight;
       }
 
