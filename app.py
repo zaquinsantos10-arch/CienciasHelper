@@ -62,7 +62,7 @@ def chat():
                     yield parte.choices[0].delta.content
         except Exception as e:
             print("erro na API:", e)
-            yield "[[ERRO]]"
+                yield "⚠️ Erro técnico: " + str(e)[:300]
 
     return Response(stream_with_context(gerar()), mimetype="text/plain")
 
