@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CiênciasHelper</title>
+  <style>
+    :root {
+      --fundo: #eef5f1; --painel: #ffffff; --texto: #1d2b25;
+      --verde: #2e7d5b; --balao-bot: #e8efeb; --borda: #c5d0ca; --erro: #fde2e2;
+    }
+    :root[data-tema="escuro"] {
+      --fundo: #0f1714; --painel: #17211d; --texto: #e3ece7;
+      --verde: #3a9d73; --balao-bot: #233029; --borda: #34443c; --erro: #4a2323;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; font-family: system-ui, sans-serif;
+      background: var(--fundo); color: var(--texto);
+      display: flex; justify-content: center;
+    }
+    main {
+      width: 100%; max-width: 720px; height: 100vh;
+      display: flex; flex-direction: column; background: var(--painel);
+    }
+    header {
+      padding: 16px 20px; background: var(--verde); color: #fff;
+      display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    }
+    header h1 { margin: 0; font-size: 1.3rem; }
+    header p { margin: 4px 0 0; font-size: .85rem; opacity: .85; }
+    .acoes { display: flex; gap: 6px; }
+    .acoes button {
+      padding: 6px 10px; background: rgba(255,255,255,.2); font-size: .85rem;
+    }
+    #conversa { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .msg { max-width: 85%; padding: 10px 14px; border-radius: 14px; line-height: 1.45; white-space: pre-wrap; }
+    .user { align-self: flex-end; background: var(--verde); color: #fff; }
+    .bot { align-self: flex-start; background: var(--balao-bot); }
+    .erro { background: var(--erro); }
+    form { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--borda); }
+    input {
+      flex: 1; padding: 12px; border: 1px solid var(--borda); border-radius: 10px;
+      font-size: 1rem; background: var(--painel); color: var(--texto);
+    }
+    button { padding: 0 20px; border: 0; border-radius: 10px; background: var(--verde); color: #fff; font-size: 1rem; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: wait; }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>🔬 CiênciasHelper</h1>
+      <p>Tire suas dúvidas de biologia, física, química e mais</p>
+    </div>
+    <div class="acoes">
+      <button id="limpar" type="button" title="Limpar conversa">🗑️ Limpar</button>
+      <button id="tema" type="button" title="Trocar tema">🌙</button>
+    </div>
+  </header>
+
+  <div id="conversa"></div>
+
+  <form id="form">
+    <input id="campo" placeholder="Digite sua pergunta..." autocomplete="off" required>
+    <button id="botao">Enviar</button>
+  </form>
+</main>
+
+<script>
+  const conversa = document.getElementById("conversa");
+  const form = document.getElementById("form");
+  const campo = document.getElementById("campo");
+  const botao = document.getElementById("botao");
+  const botaoLimpar = document.getElementById("limpar");
+  const botaoTema = document.getElementById("tema");
+  const raiz = document.documentElement;
+
+  const BOAS_VINDAS = 'Oi! Eu sou o CiênciasHelper. Pergunte qualquer coisa de ciências, por exemplo: "por que o céu é azul?"';
+  let historico = [];
+
+  // ---------- tema claro/escuro ----------
+  function aplicarTema(tema) {
+    raiz.dataset.tema = tema;
+    botaoTema.textContent = tema === "escuro" ? "☀️" : "🌙";
+  }
+
+  let temaSalvo = null;
+  try { temaSalvo = localStorage.getItem("tema"); } catch (e) {}
+  const prefereEscuro = window.matchMedia("(prefers-color-scheme: dark)").matches;
+  aplicarTema(temaSalvo || (prefereEscuro ? "escuro" : "claro"));
+
+  botaoTema.addEventListener("click", () => {
+    const novo = raiz.dataset.tema === "escuro" ? "claro" : "escuro";
+    aplicarTema(novo);
+    try { localStorage.setItem("tema", novo); } catch (e) {}
+  });
+
+  // ---------- conversa ----------
+  function adicionar(texto, classe) {
+    const div = document.createElement("div");
+    div.className = "msg " + classe;
+    div.textContent = texto;
+    conversa.appendChild(div);
+    conversa.scrollTop = conversa.scrollHeight;
+    return div;
+  }
+
+  function limparConversa() {
+    historico = [];
+    conversa.innerHTML = "";
+    adicionar(BOAS_VINDAS, "bot");
+    campo.focus();
+  }
+
+  botaoLimpar.addEventListener("click", limparConversa);
+  limparConversa();
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const pergunta = campo.value.trim();
+    if (!pergunta) return;
+
+    adicionar(pergunta, "user");
+    historico.push({ role: "user", content: pergunta });
+    campo.value = "";
+    botao.disabled = true;
+    botaoLimpar.disabled = true;
+    const balao = adicionar("Pensando...", "bot");
+
+    try {
+      const r = await fetch("/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mensagens: historico }),
+      });
+
+      if (!r.ok) {
+        const dados = await r.json().catch(() => ({}));
+        throw new Error(dados.erro || "Algo deu errado.");
+      }
+
+      // lê a resposta aos poucos e vai montando o texto
+      const leitor = r.body.getReader();
+      const decoder = new TextDecoder();
+      let texto = "";
+      while (true) {
+        const { done, value } = await leitor.read();
+        if (done) break;
+        texto += decoder.decode(value, { stream: true });
+        if (texto.includes("[[ERRO]]")) throw new Error("Deu ruim ao falar com a IA. Tente de novo.");
+        balao.textContent = texto;
+        conversa.scrollTop = conversa.scrollHeight;
+      }
+
+      historico.push({ role: "assistant", content: texto });
+    } catch (err) {
+      balao.textContent = err.message;
+      balao.classList.add("erro");
+      historico.pop(); // tira a pergunta que falhou
+    }
+
+    botao.disabled = false;
+    botaoLimpar.disabled = false;
+    campo.focus();
+  });
+</script>
+</body>
+</html>
