@@ -7,13 +7,18 @@ from flask import Flask, Response, jsonify, render_template, request, stream_wit
 load_dotenv()
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 6 * 1024 * 1024  # aceita no máximo 6 MB por pedido
+
 cliente = OpenAI(
     api_key=os.getenv("GROQ_API_KEY"),
     base_url="https://api.groq.com/openai/v1",
 )
 
-MODELO = os.getenv("MODELO", "llama-3.3-70b-versatile")
+MODELO = os.getenv("MODELO", "openai/gpt-oss-20b")
+# modelo usado só quando o aluno manda uma imagem (precisa ter visão)
+MODELO_IMAGEM = os.getenv("MODELO_IMAGEM", "meta-llama/llama-4-scout-17b-16e-instruct")
 MAX_MENSAGENS = 20  # limite do histórico pra não estourar o contexto
+MAX_IMAGEM = 5_000_000  # tamanho máximo da imagem em texto (base64)
 
 INSTRUCOES = """Você é o CiênciasHelper, um assistente que ajuda estudantes com ciências
 (biologia, física, química, geologia, astronomia e ciências da natureza em geral).
@@ -23,6 +28,8 @@ Regras:
 - Foque em perguntas de nível fundamental e médio. Use exemplos do dia a dia.
 - Seja curto: de preferência até 3 parágrafos. Passe fórmulas só quando precisar.
 - Se não souber ou a pergunta for ambígua, diga isso em vez de inventar.
+- Se o aluno mandar uma imagem (esquema, foto, exercício), descreva o que vê
+  e explique o conteúdo de ciências que aparece nela.
 - Se a pergunta não tiver relação com ciências, explique educadamente que você
   só ajuda com essa matéria e convide a pessoa a perguntar algo de ciências.
 - Não faça a lição de casa inteira pela pessoa: explique o raciocínio."""
@@ -37,6 +44,7 @@ def index():
 def chat():
     dados = request.get_json(silent=True) or {}
     historico = dados.get("mensagens", [])
+    imagem = dados.get("imagem")
 
     # só aceita o formato esperado
     mensagens = [
@@ -48,12 +56,28 @@ def chat():
     if not mensagens or mensagens[-1]["role"] != "user":
         return jsonify({"erro": "Mande uma pergunta primeiro."}), 400
 
+    modelo = MODELO
+
+    if imagem:
+        if not (isinstance(imagem, str) and imagem.startswith("data:image/") and len(imagem) < MAX_IMAGEM):
+            return jsonify({"erro": "Imagem inválida ou muito grande."}), 400
+        # a imagem vai junto só na última pergunta
+        texto = mensagens[-1]["content"]
+        mensagens[-1] = {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": texto},
+                {"type": "image_url", "image_url": {"url": imagem}},
+            ],
+        }
+        modelo = MODELO_IMAGEM
+
     def gerar():
         # manda a resposta em pedacinhos conforme a IA vai escrevendo
         try:
             fluxo = cliente.chat.completions.create(
-                model=MODELO,
-                max_tokens=700,
+                model=modelo,
+                max_tokens=1500,
                 messages=[{"role": "system", "content": INSTRUCOES}] + mensagens,
                 stream=True,
             )
