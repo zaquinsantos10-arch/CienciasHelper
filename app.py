@@ -1,15 +1,18 @@
 import os
 
-from anthropic import Anthropic
+from openai import OpenAI
 from dotenv import load_dotenv
 from flask import Flask, Response, jsonify, render_template, request, stream_with_context
 
 load_dotenv()
 
 app = Flask(__name__)
-cliente = Anthropic()  # pega a ANTHROPIC_API_KEY do ambiente
+cliente = OpenAI(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+)
 
-MODELO = os.getenv("MODELO", "claude-sonnet-5-5")
+MODELO = os.getenv("MODELO", "llama-3.3-70b-versatile")
 MAX_MENSAGENS = 20  # limite do histórico pra não estourar o contexto
 
 INSTRUCOES = """Você é o CiênciasHelper, um assistente que ajuda estudantes com ciências
@@ -48,14 +51,15 @@ def chat():
     def gerar():
         # manda a resposta em pedacinhos conforme a IA vai escrevendo
         try:
-            with cliente.messages.stream(
+            fluxo = cliente.chat.completions.create(
                 model=MODELO,
                 max_tokens=700,
-                system=INSTRUCOES,
-                messages=mensagens,
-            ) as fluxo:
-                for pedaco in fluxo.text_stream:
-                    yield pedaco
+                messages=[{"role": "system", "content": INSTRUCOES}] + mensagens,
+                stream=True,
+            )
+            for parte in fluxo:
+                if parte.choices and parte.choices[0].delta.content:
+                    yield parte.choices[0].delta.content
         except Exception as e:
             print("erro na API:", e)
             yield "[[ERRO]]"
